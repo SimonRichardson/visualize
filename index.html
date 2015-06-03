@@ -1,31 +1,20 @@
+<!doctype html>
 <html>
   <head>
     <title>Visualizer</title>
-    <script src='http://cdn.ractivejs.org/latest/ractive.min.js'></script>
-    <script src='https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.9.3/lodash.js'></script>
-    <script src='./tickets.js'></script>
-
-    <link rel="stylesheet" href="./style.css">
+    <meta charset="utf-8" />
+    <style type="text/css">
+      body {
+        background: #1f1f1f;
+      }
+      canvas {
+        padding: 10px;
+        border: #eeee00 solid 5px;
+      }
+    </style>
   </head>
   <body>
-    <div id="container">
-    </div>
-
-
-    <script id='template' type='text/ractive'>
-      {{#each tickets}}
-        <div class="ticket" data-available="{{available}}" data-attempted="{{attempted}}"></div>
-      {{/each}}
-    </script>
-
-    <script>
-      var ractive = new Ractive({
-        el: '#container',
-        template: '#template',
-        data: {tickets: tickets}
-      });
-
-      app01.Run();
-    </script>
+    <canvas id="board"></canvas>
+    <script src="main.js"></script>
   </body>
 </html>
