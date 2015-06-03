@@ -1,0 +1,20 @@
+.ticket {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+
+  background-color: #888888;
+  border: 1px solid #222222;
+  transition: all 0.3s;
+}
+
+.ticket[data-available="false"] {
+  transition: all 0.3s;
+  background-color: #FF8888;
+}
+
+.ticket[data-attempted="true"] {
+  transition: all 0.3s;
+  background-color: #DDDD88;
+  border-color: #999999;
+}
