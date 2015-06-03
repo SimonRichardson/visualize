@@ -10,7 +10,7 @@
       },
       colour = {
         available: new RGB(31, 31, 31),
-        sold: new RGB(238, 238, 0),
+        sold: new RGB(100, 100, 0),
       },
       numOfApps = 10,
       chunk = (size * size) / numOfApps,
@@ -90,6 +90,11 @@
   function darken(amount, rgb) {
     var x = rgbToHsl(rgb),
         y = new HSL(x.h, x.s, Math.min(1, Math.max(0, x.l - (amount / 50))));
+    return hslToRgb(y);
+  }
+  function lighten(amount, rgb) {
+    var x = rgbToHsl(rgb),
+        y = new HSL(x.h, x.s, Math.max(0, Math.min(1, x.l + (amount / 50))));
     return hslToRgb(y);
   }
 
@@ -276,7 +281,7 @@
       for(x = 0; x < board.length; x++) {
         for(y = 0; y < board[x].length; y++) {
           var c = board[x][y];
-          canvas.fillStyle = (c.state == state.sold) ? darken(c.index, colour.sold).toString() : colour.available.toString();
+          canvas.fillStyle = (c.state == state.sold) ? lighten(c.index, colour.sold).toString() : colour.available.toString();
           canvas.fillRect(x, y, 1, 1);
         }
       }
