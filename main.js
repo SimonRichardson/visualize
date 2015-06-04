@@ -6,11 +6,12 @@
       scale = 5,
       state = {
         available: 1,
-        sold: 2
+        claimed:   2,
+        sold:      3
       },
       colour = {
-        available: new RGB(31, 31, 31),
-        sold: new RGB(100, 100, 0),
+        claimed: new RGB(238, 0, 238),
+        sold:    new RGB(238, 238, 0)
       },
       numOfApps = 10,
       chunk = (size * size) / numOfApps,
@@ -153,81 +154,7 @@
     return new RGB(r * 255, g * 255, b * 255);
   }
 
-  // Logic
-  function Pos(x, y) {
-    this.x = x;
-    this.y = y;
-  }
-
-  function Pointer(board, pos) {
-    this.board = board;
-    this.pos = pos;
-  }
-  Pointer.prototype.updatePos = function(pos) {
-    return new Pointer(this.board, pos);
-  };
-  Pointer.prototype.update = function(f) {
-    var board = [], x;
-    for(x = 0; x < this.board.length; x++) {
-      board[x] = this.board[x].slice();
-    }
-    board[this.pos.x][this.pos.y] = f(this.board[this.pos.x][this.pos.y]);
-    return new Pointer(board, this.pos);
-  };
-  Pointer.prototype.extract = function() {
-    return this.board[this.pos.x][this.pos.y];
-  };
-  Pointer.prototype.extend = function(f) {
-    var board = [], x, y;
-    for(x = 0; x < this.board.length; x++) {
-      board[x] = [];
-      for(y = 0; y < this.board[x].length; y++) {
-        board[x][y] = f(new Pointer(this.board, new Pos(x, y)));
-      }
-    }
-    return new Pointer(board, this.pos);
-  };
-
-  // Blind stab in the dark.
-  function rules(index) {
-    return function(c) {
-      return {
-        state: c.state == state.available ? state.sold : c.state,
-        index: index,
-        pos: c.pos
-      };
-    };
-  }
-
-  function find(state, board) {
-    return filter(board, function(x) {
-      return x.state === state;
-    });
-  }
-
-  function step(board) {
-    var rec = function(pointer, index) {
-      if(index < 1) {
-        return pointer;
-      }
-
-      var a = chunk * (index - 1),
-          x = find(state.available, unwrap(pointer.board)), // .slice(a, a + chunk)
-          p, y, z;
-      if(x.length < 1) {
-        return pointer;
-      }
-
-      p = Math.floor(Math.random() * x.length);
-      y = x[p];
-      z = pointer.updatePos(y.pos).update(rules(index));
-      return rec(z, index - 1);
-    };
-    
-    return rec(new Pointer(board, new Pos(0, 0)), numOfApps).board;
-  }
-
-  // IO monad
+   // IO monad
   function IO(unsafePerformIO) {
     this.unsafePerformIO = unsafePerformIO;
   }
@@ -251,6 +178,125 @@
     });
   };
 
+  // Logic
+  function Pos(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+
+  function Pointer(board, pos) {
+    this.board = board;
+    this.pos = pos;
+  }
+  Pointer.prototype.updatePos = function(pos) {
+    return new Pointer(this.board, pos);
+  };
+  Pointer.prototype.extract = function() {
+    return this.board[this.pos.x][this.pos.y];
+  };
+  Pointer.prototype.extend = function(f) {
+    var board = [], x, y;
+    for(x = 0; x < this.board.length; x++) {
+      board[x] = [];
+      for(y = 0; y < this.board[x].length; y++) {
+        board[x][y] = f(new Pointer(this.board, new Pos(x, y)));
+      }
+    }
+    return new Pointer(board, this.pos);
+  };
+  Pointer.prototype.singular = function(f) {
+    var board = [], 
+        x = this.pos.x,
+        y = this.pos.y,
+        i;
+    for(i = 0; i < this.board.length; i++) {
+      board[i] = this.board[i].slice();
+    }
+    board[x][y] = f(new Pointer(this.board, new Pos(x, y)));
+    return new Pointer(board, this.pos);
+  };
+
+  // Blind stab in the dark.
+  function inBounds(pos) {
+    // This could actually be a shard boundary
+    return pos.x >= 0 && pos.y >= 0 && pos.x < size && pos.y < size;
+  }
+
+  function isValidState(s) {
+    return s.curr === state.available;
+  }
+
+  function pointerNeighbours(pointer) {
+    // We should change the offsets instead of breadth search
+    var offsets = [new Pos(-1, -1), new Pos(-1, 0), new Pos(-1, 1), new Pos(0, -1), new Pos(0, 1), new Pos(1, -1), new Pos(1, 0), new Pos(1, 1)],
+        positions = filter(map(offsets, function(offset) {
+          return new Pos(pointer.pos.x + offset.x, pointer.pos.y + offset.y);
+        }), inBounds);
+
+    return filter(map(positions, function(pos) {
+      return pointer.updatePos(pos).extract();
+    }), isValidState);
+  }
+
+  function availableNeighbours(pointer) {
+    return filter(pointerNeighbours(pointer), identity);
+  }
+
+  function rule(pointer) {
+    var c = pointer.extract(),
+        n = availableNeighbours(pointer);
+
+    // Truly available.
+    if (c.curr == state.available && c.next == state.available) {
+      return {
+        curr: state.available,
+        next: state.claimed,
+        inc:  0
+      };
+    } else if (c.curr == state.available && c.next == state.claimed) {
+      return {
+        curr: state.claimed,
+        next: state.sold,
+        inc: 0
+      };
+    } else if (c.curr == state.claimed && c.next == state.sold) {
+      return {
+        curr: state.sold,
+        next: state.sold,
+        inc: 0
+      };
+    }
+    return c;
+  }
+
+  function rules(pointer) {
+    var c = pointer.extract();
+    if (c.curr === state.claimed && c.inc > 10000) {
+      return {
+        curr: state.available,
+        next: state.available,
+        inc: 0
+      };
+    }
+    return {
+      curr: c.curr,
+      next: c.next,
+      inc: c.inc + 1
+    };
+  }
+
+  function randomPos() {
+    var x = Math.floor(Math.random() * size),
+        y = Math.floor(Math.random() * size);
+    return new Pos(x, y);
+  }
+
+  function step(board) {
+    return new Pointer(board, randomPos())
+      .extend(rules)
+      .board;
+  }
+
   setup = new IO(function() {
     element.width = size * scale;
     element.height = size * scale;
@@ -265,9 +311,8 @@
         board[x] = [];
         for(y = 0; y < size; y++) {
           board[x][y] = {
-            state: state.available,
-            index: 0,
-            pos: new Pos(x, y),
+            curr: state.available,
+            next: state.available
           };
         }
       }
@@ -281,8 +326,15 @@
       for(x = 0; x < board.length; x++) {
         for(y = 0; y < board[x].length; y++) {
           var c = board[x][y];
-          canvas.fillStyle = (c.state == state.sold) ? lighten(c.index, colour.sold).toString() : colour.available.toString();
-          canvas.fillRect(x, y, 1, 1);
+          if(c.curr == state.claimed) {
+            canvas.fillStyle = colour.claimed.toString();
+            canvas.fillRect(x, y, 1, 1);  
+          } else if(c.curr == state.sold) {
+            canvas.fillStyle = colour.sold.toString();
+            canvas.fillRect(x, y, 1, 1);  
+          } else {
+            canvas.clearRect(x, y, 1, 1);
+          }
         }
       }
     });
