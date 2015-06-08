@@ -2,25 +2,22 @@
   'use strict';
   var element = document.getElementById('board'),
       canvas = element.getContext('2d'),
-      size = 100,
+      size = 50,
       scale = 5,
-      state = {
-        available: 1,
-        claimed:   2,
-        sold:      3
-      },
-      colour = {
-        claimed: new RGB(238, 0, 238),
-        sold:    new RGB(238, 238, 0)
-      },
-      numOfApps = 10,
-      chunk = (size * size) / numOfApps,
       setup,
       main;
 
   // Helpers
   function identity(x) {
     return x;
+  }
+
+  function compose(f) {
+    return function(g) {
+      return function(h) {
+        return g(f(h));
+      };
+    };
   }
 
   function map(as, f) {
@@ -174,7 +171,7 @@
     return new IO(function() {
       setTimeout(function() {
         io.unsafePerformIO();
-      }, 4);
+      }, 1);
     });
   };
 
@@ -222,8 +219,22 @@
     return pos.x >= 0 && pos.y >= 0 && pos.x < size && pos.y < size;
   }
 
-  function isValidState(s) {
-    return s.curr === state.available;
+  function match(pointer, pos) {
+    return pos.x == pointer.pos.x && pos.y == pointer.pos.y;
+  }
+
+  function predicate(f) {
+    return function(s) {
+      return f(s);
+    };
+  }
+
+  function first(s) {
+    return s[0];
+  }
+
+  function not(s) {
+    return !s;
   }
 
   function pointerNeighbours(pointer) {
@@ -235,65 +246,36 @@
 
     return filter(map(positions, function(pos) {
       return pointer.updatePos(pos).extract();
-    }), isValidState);
+    }), predicate(not));
   }
 
   function availableNeighbours(pointer) {
     return filter(pointerNeighbours(pointer), identity);
   }
 
-  function rule(pointer) {
-    var c = pointer.extract(),
-        n = availableNeighbours(pointer);
-
-    // Truly available.
-    if (c.curr == state.available && c.next == state.available) {
-      return {
-        curr: state.available,
-        next: state.claimed,
-        inc:  0
-      };
-    } else if (c.curr == state.available && c.next == state.claimed) {
-      return {
-        curr: state.claimed,
-        next: state.sold,
-        inc: 0
-      };
-    } else if (c.curr == state.claimed && c.next == state.sold) {
-      return {
-        curr: state.sold,
-        next: state.sold,
-        inc: 0
-      };
-    }
-    return c;
-  }
-
-  function rules(pointer) {
-    var c = pointer.extract();
-    if (c.curr === state.claimed && c.inc > 10000) {
-      return {
-        curr: state.available,
-        next: state.available,
-        inc: 0
-      };
-    }
-    return {
-      curr: c.curr,
-      next: c.next,
-      inc: c.inc + 1
+  function rules(pos) {
+    return function(pointer) {
+      var c = pointer.extract();
+      return c ? c : match(pointer, pos);
     };
   }
 
-  function randomPos() {
-    var x = Math.floor(Math.random() * size),
-        y = Math.floor(Math.random() * size);
-    return new Pos(x, y);
+  function position(a) {
+    var r = a[1] % size,
+        c = (a[1] / size) | 0;
+    return new Pos(c, r);
+  }
+
+  function randomPos(board) {
+    var x = zipWithIndex(unwrap(board)),
+        y = map(filter(x, compose(first)(not)), position);
+    return y[Math.floor(Math.random() * (y.length - 1))];
   }
 
   function step(board) {
-    return new Pointer(board, randomPos())
-      .extend(rules)
+    var p = randomPos(board);
+    return new Pointer(board, new Pos(0, 0))
+      .extend(rules(p))
       .board;
   }
 
@@ -310,10 +292,7 @@
       for(x = 0; x < size; x++) {
         board[x] = [];
         for(y = 0; y < size; y++) {
-          board[x][y] = {
-            curr: state.available,
-            next: state.available
-          };
+          board[x][y] = false;
         }
       }
       return board;
@@ -326,11 +305,8 @@
       for(x = 0; x < board.length; x++) {
         for(y = 0; y < board[x].length; y++) {
           var c = board[x][y];
-          if(c.curr == state.claimed) {
-            canvas.fillStyle = colour.claimed.toString();
-            canvas.fillRect(x, y, 1, 1);  
-          } else if(c.curr == state.sold) {
-            canvas.fillStyle = colour.sold.toString();
+          if(c) {
+            canvas.fillStyle = new RGB(238, 238, 0).toString();
             canvas.fillRect(x, y, 1, 1);  
           } else {
             canvas.clearRect(x, y, 1, 1);
