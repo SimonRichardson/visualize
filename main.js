@@ -2,8 +2,9 @@
   'use strict';
   var element = document.getElementById('board'),
       canvas = element.getContext('2d'),
-      size = 50,
+      size = 64,
       scale = 5,
+      shardSize = Math.floor((size * size) / (4 * 4)),
       setup,
       main;
 
@@ -46,14 +47,8 @@
     return r;
   }
 
-  function unwrap(as) {
-    var r = [], x, y;
-    for(x = 0; x < as.length; x++) {
-      for(y = 0; y < as[x].length; y++) {
-        r.push(as[x][y]); 
-      }
-    }
-    return r;
+  function inc(x) {
+    return x + 1;
   }
 
   function pad2(c) {
@@ -176,41 +171,81 @@
   };
 
   // Logic
-  function Pos(x, y) {
+  function Route(x) {
     this.x = x;
-    this.y = y;
+  }
+  Route.prototype.equals = function(x) {
+    var i;
+    for(i = 0; i < this.x.length; i++) {
+      if(this.x[i] !== x.x[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  function QuadTree(board, route) {
+    this.board = board;
+    this.route = route;
+  }
+  QuadTree.prototype.depth = function() {
+    var rec = function(board, index) {
+      return !Array.isArray(board) ? index : rec(board[0], index + 1);
+    };
+    return rec(this.board, 0);
+  }
+  QuadTree.prototype.updateRoute = function(route) {
+    return new QuadTree(this.board, route);
+  };
+  QuadTree.prototype.extract = function() {
+    var select = function(x, y, z) {
+      return z == 1 ? x[y[0]] : select(x[y[0]], y.slice(1), z - 1);
+    };
+    return select(this.board, this.route.x, this.depth() - 1);
+  };
+  QuadTree.prototype.extend = function(f) {
+    var self = this,
+        rec = function(board, crumb, index) {
+          var res = [], route, i;
+          for(i = 0; i < board.length; i++) {
+            if(index == 1) {
+              res[i] = f(new QuadTree(self.board, new Route(crumb.concat([i]))));
+            } else {
+              res[i] = rec(board[i], crumb.concat([i]), index - 1);
+            }
+          }
+          return res;
+        };
+    return new QuadTree(rec(this.board, [], this.depth() - 1), this.route);
+  };
+
+  function Pos(route, offset) {
+    this.route = route;
+    this.offset = offset;
   }
 
-  function Pointer(board, pos) {
-    this.board = board;
+  function Pointer(tree, pos) {
+    this.tree = tree;
     this.pos = pos;
   }
   Pointer.prototype.updatePos = function(pos) {
-    return new Pointer(this.board, pos);
+    return new Pointer(this.tree, pos);
   };
   Pointer.prototype.extract = function() {
-    return this.board[this.pos.x][this.pos.y];
+    return this.tree.updateRoute(this.pos.route).extract()[this.pos.offset];
   };
   Pointer.prototype.extend = function(f) {
-    var board = [], x, y;
-    for(x = 0; x < this.board.length; x++) {
-      board[x] = [];
-      for(y = 0; y < this.board[x].length; y++) {
-        board[x][y] = f(new Pointer(this.board, new Pos(x, y)));
-      }
-    }
-    return new Pointer(board, this.pos);
-  };
-  Pointer.prototype.singular = function(f) {
-    var board = [], 
-        x = this.pos.x,
-        y = this.pos.y,
-        i;
-    for(i = 0; i < this.board.length; i++) {
-      board[i] = this.board[i].slice();
-    }
-    board[x][y] = f(new Pointer(this.board, new Pos(x, y)));
-    return new Pointer(board, this.pos);
+    var self = this,
+        tree = this.tree.extend(function(x) {
+          var tree = [],
+              row = x.extract(),
+              i;
+          for(i = 0; i < row.length; i++) {
+            tree[i] = f(new Pointer(self.tree, new Pos(x.route, i)));
+          }
+          return tree;
+        });
+    return new Pointer(tree, this.pos);
   };
 
   // Blind stab in the dark.
@@ -220,7 +255,7 @@
   }
 
   function match(pointer, pos) {
-    return pos.x == pointer.pos.x && pos.y == pointer.pos.y;
+    return pos.route.equals(pointer.pos.route) && pos.offset == pointer.pos.offset;
   }
 
   function predicate(f) {
@@ -260,22 +295,21 @@
     };
   }
 
-  function position(a) {
-    var r = a[1] % size,
-        c = (a[1] / size) | 0;
-    return new Pos(c, r);
+  function randomPos(tree) {
+    var x = [
+          Math.floor(Math.random() * 4),
+          Math.floor(Math.random() * 4)
+        ],
+        y = Math.floor(Math.random() * shardSize);
+    return new Pos(new Route(x), y);
   }
 
-  function randomPos(board) {
-    var x = zipWithIndex(unwrap(board)),
-        y = map(filter(x, compose(first)(not)), position);
-    return y[Math.floor(Math.random() * (y.length - 1))];
-  }
-
-  function step(board) {
-    var p = randomPos(board);
-    return new Pointer(board, new Pos(0, 0))
+  function step(tree) {
+    var p = randomPos(tree),
+        r = new Route([0, 0]);
+    return new Pointer(new QuadTree(tree, r), new Pos(r, 0))
       .extend(rules(p))
+      .tree
       .board;
   }
 
@@ -285,44 +319,56 @@
     canvas.scale(scale, scale);
   });
 
-  function generateBoard() {
-    return new IO(function() {
-      var board = [],
-          x, y;
-      for(x = 0; x < size; x++) {
-        board[x] = [];
-        for(y = 0; y < size; y++) {
-          board[x][y] = false;
-        }
+  function flattenTree(tree) {
+    var r = [], x, y;
+    for(x = 0; x < tree.length; x++) {
+      for(y = 0; y < tree[x].length; y++) {
+        r = r.concat(tree[x][y]); 
       }
-      return board;
-    });
+    }
+    return r;
   }
 
-  function drawBoard(board) {
+  function generateTree() {
     return new IO(function() {
-      var x, y;
-      for(x = 0; x < board.length; x++) {
-        for(y = 0; y < board[x].length; y++) {
-          var c = board[x][y];
-          if(c) {
-            canvas.fillStyle = new RGB(238, 238, 0).toString();
-            canvas.fillRect(x, y, 1, 1);  
-          } else {
-            canvas.clearRect(x, y, 1, 1);
+      var tree = [],
+          x, y, z;
+      for(x = 0; x < 4; x++) {
+        tree[x] = [];
+        for(y = 0; y < 4; y++) {
+          tree[x][y] = [];
+          for(z = 0; z < shardSize; z++) {
+            tree[x][y][z] = false;
           }
         }
       }
+      return tree;
     });
   }
 
-  function loop(board) {
-    return drawBoard(board).chain(function() {
-      return loop(step(board)).fork();
+  function drawTree(tree) {
+    return new IO(function() {
+      var i, x, y;
+      for(i = 0; i < tree.length; i++) {
+        var x = i % size,
+            y = Math.floor(i / size);
+        if(tree[i]) {
+          canvas.fillStyle = new RGB(238, 238, 0).toString();
+          canvas.fillRect(x, y, 1, 1);
+        } else {
+          canvas.clearRect(x, y, 1, 1);
+        }
+      }
     });
   }
 
-  main = setup.chain(generateBoard).chain(loop);
+  function loop(tree) {
+    return drawTree(flattenTree(tree)).chain(function() {
+      return loop(step(tree)).fork();
+    });
+  }
+
+  main = setup.chain(generateTree).chain(loop);
 
   // Perform effects!
   main.unsafePerformIO();
