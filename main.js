@@ -51,99 +51,12 @@
     return x + 1;
   }
 
-  function pad2(c) {
-    return c.length == 1 ? '0' + c : '' + c;
+  function first(s) {
+    return s[0];
   }
 
-  function RGB(r, g, b) {
-    this.r = r;
-    this.g = g;
-    this.b = b;
-  }
-  RGB.prototype.toString = function() {
-    var r = Math.round(this.r).toString(16),
-        g = Math.round(this.g).toString(16),
-        b = Math.round(this.b).toString(16);
-    return "#" + pad2(r) + pad2(g) + pad2(b);
-  };
-
-  function HSL(h, s, l) {
-    this.h = h;
-    this.s = s;
-    this.l = l;
-  }
-    
-  function brighten(amount, rgb) {
-    var x = -(amount / 50),
-        r = Math.max(0, Math.min(255, rgb.r - Math.round(255 * x))),
-        g = Math.max(0, Math.min(255, rgb.g - Math.round(255 * x))),
-        b = Math.max(0, Math.min(255, rgb.b - Math.round(255 * x)));
-    return new RGB(r, g, b);
-  }
-  function darken(amount, rgb) {
-    var x = rgbToHsl(rgb),
-        y = new HSL(x.h, x.s, Math.min(1, Math.max(0, x.l - (amount / 50))));
-    return hslToRgb(y);
-  }
-  function lighten(amount, rgb) {
-    var x = rgbToHsl(rgb),
-        y = new HSL(x.h, x.s, Math.max(0, Math.min(1, x.l + (amount / 50))));
-    return hslToRgb(y);
-  }
-
-  function rgbToHsl(rgb) {
-    var r = rgb.r / 255,
-        g = rgb.g / 255,
-        b = rgb.b / 255,
-        max = Math.max(r, g, b), 
-        min = Math.min(r, g, b),
-        l = (max + min) / 2,
-        h, s;
-
-    if(max == min) {
-        h = s = 0;
-    } else {
-        var d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        switch(max) {
-          case r: 
-            h = (g - b) / d + (g < b ? 6 : 0); 
-            break;
-          case g: 
-            h = (b - r) / d + 2; 
-            break;
-          case b: 
-            h = (r - g) / d + 4; 
-            break;
-        }
-
-        h /= 6;
-    }
-    return new HSL(h, s, l);
-  }
-
-  function hslToRgb(hsl) {
-    var r, g, b;
-    function hue2rgb(p, q, t) {
-        if(t < 0) t += 1;
-        if(t > 1) t -= 1;
-        if(t < 1/6) return p + (q - p) * 6 * t;
-        if(t < 1/2) return q;
-        if(t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-    }
-
-    if(hsl.s === 0) {
-        r = g = b = hsl.l;
-    } else {
-        var q = hsl.l < 0.5 ? hsl.l * (1 + hsl.s) : hsl.l + hsl.s - hsl.l * hsl.s,
-            p = 2 * hsl.l - q;
-        r = hue2rgb(p, q, hsl.h + 1/3);
-        g = hue2rgb(p, q, hsl.h);
-        b = hue2rgb(p, q, hsl.h - 1/3);
-    }
-
-    return new RGB(r * 255, g * 255, b * 255);
+  function not(s) {
+    return !s;
   }
 
    // IO monad
@@ -164,9 +77,9 @@
   IO.prototype.fork = function() {
     var io = this;
     return new IO(function() {
-      setTimeout(function() {
+      requestAnimationFrame(function() {
         io.unsafePerformIO();
-      }, 1);
+      });
     });
   };
 
@@ -258,20 +171,6 @@
     return pos.route.equals(pointer.pos.route) && pos.offset == pointer.pos.offset;
   }
 
-  function predicate(f) {
-    return function(s) {
-      return f(s);
-    };
-  }
-
-  function first(s) {
-    return s[0];
-  }
-
-  function not(s) {
-    return !s;
-  }
-
   function numOfSelectedInQuadrants(tree) {
     var res = [], x, y;
     for(x = 0; x < tree.length; x++) {
@@ -304,8 +203,9 @@
 
   function randomPos(tree) {
     var ranking = rankQuadrants(numOfSelectedInQuadrants(tree)),
-        offset = Math.floor(Math.random() * shardSize);
-    return new Pos(ranking[0], offset);
+        head = ranking[0],
+        offset = filter(zipWithIndex(tree[head.x[0]][head.x[1]]), compose(first)(not));
+    return new Pos(head, offset[Math.floor(Math.random() * offset.length)][1]);
   }
 
   function step(tree) {
@@ -357,7 +257,7 @@
         var x = i % size,
             y = Math.floor(i / size);
         if(tree[i]) {
-          canvas.fillStyle = new RGB(238, 238, 0).toString();
+          canvas.fillStyle = "#eeee00";
           canvas.fillRect(x, y, 1, 1);
         } else {
           canvas.clearRect(x, y, 1, 1);
