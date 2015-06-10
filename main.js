@@ -272,20 +272,27 @@
     return !s;
   }
 
-  function pointerNeighbours(pointer) {
-    // We should change the offsets instead of breadth search
-    var offsets = [new Pos(-1, -1), new Pos(-1, 0), new Pos(-1, 1), new Pos(0, -1), new Pos(0, 1), new Pos(1, -1), new Pos(1, 0), new Pos(1, 1)],
-        positions = filter(map(offsets, function(offset) {
-          return new Pos(pointer.pos.x + offset.x, pointer.pos.y + offset.y);
-        }), inBounds);
-
-    return filter(map(positions, function(pos) {
-      return pointer.updatePos(pos).extract();
-    }), predicate(not));
+  function numOfSelectedInQuadrants(tree) {
+    var res = [], x, y;
+    for(x = 0; x < tree.length; x++) {
+      res[x] = [];
+      for(y = 0; y < tree[x].length; y++) {
+        res[x][y] = filter(tree[x][y], compose(not)(not)).length;
+      }
+    }
+    return res;
   }
 
-  function availableNeighbours(pointer) {
-    return filter(pointerNeighbours(pointer), identity);
+  function rankQuadrants(selected) {
+    var res = [], x, y, z;
+    for(x = 0; x < selected.length; x++) {
+      for(y = 0; y < selected[x].length; y++) {
+        res.push([new Route([x, y]), selected[x][y]])
+      }
+    }
+    return map(res.sort(function(a, b) {
+      return a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
+    }), first);
   }
 
   function rules(pos) {
@@ -296,12 +303,9 @@
   }
 
   function randomPos(tree) {
-    var x = [
-          Math.floor(Math.random() * 4),
-          Math.floor(Math.random() * 4)
-        ],
-        y = Math.floor(Math.random() * shardSize);
-    return new Pos(new Route(x), y);
+    var ranking = rankQuadrants(numOfSelectedInQuadrants(tree)),
+        offset = Math.floor(Math.random() * shardSize);
+    return new Pos(ranking[0], offset);
   }
 
   function step(tree) {
