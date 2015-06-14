@@ -133,6 +133,9 @@
     }
     return true;
   };
+  Route.prototype.toString = function() {
+    return 'Route(' + this.x + ')';
+  };
 
   function QuadTree(board, route) {
     this.board = board;
@@ -173,6 +176,9 @@
     this.route = route;
     this.offset = offset;
   }
+  Pos.prototype.toString = function() {
+    return 'Pos(route: ' + this.route.toString() + ', offset: ' + this.offset + ')';
+  };
 
   function Pointer(tree, pos) {
     this.tree = tree;
@@ -249,14 +255,18 @@
     return tree.map(function(a) {
       return randomPos(a);
     }).chain(function(p) {
-      return tree.map(function(a) {
-        var r = new Route([0, 0]),
-            point = new Pointer(new QuadTree(a, r), new Pos(r, 0))
-              .extend(rules(p))
-              .tree
-              .board;
-        return point;
-      });
+      return tree
+            .tell('Random Position: ' + p.toString())
+            .chain(function() {
+              return tree.map(function(a) {
+                var r = new Route([0, 0]),
+                    point = new Pointer(new QuadTree(a, r), new Pos(r, 0))
+                      .extend(rules(p))
+                      .tree
+                      .board;
+                return point;
+              });
+            });
     });
   }
 
@@ -303,7 +313,8 @@
 
   function loop(tree) {
     return drawTree(tree).chain(function(x) {
-      return loop(step(Writer.of(x.run()[0]))).fork();
+      var result = x.run();
+      return loop(step(Writer.of(result[0]))).fork();
     });
   }
 
