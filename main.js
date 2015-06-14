@@ -13,6 +13,12 @@
     return x;
   }
 
+  function constant(x) {
+    return function(y) {
+      return x;
+    };
+  }
+
   function compose(f) {
     return function(g) {
       return function(h) {
@@ -75,11 +81,42 @@
     });
   };
   IO.prototype.fork = function() {
-    var io = this;
+    var self = this;
     return new IO(function() {
       requestAnimationFrame(function() {
-        io.unsafePerformIO();
+        self.unsafePerformIO();
       });
+    });
+  };
+
+  // Writer monad
+  function Writer(run) {
+    this.run = run;
+  }
+  Writer.of = function(x) {
+    return new Writer(function() {
+      return [x, []];
+    });
+  };
+  Writer.prototype.chain = function(f) {
+    var self = this;
+    return new Writer(function() {
+      var result = self.run(),
+          t = f(result[0]).run();
+      return [t[0], result[1].concat(t[1])];
+    });
+  };
+  Writer.prototype.map = function(f) {
+    return this.chain(function(a) {
+      return new Writer(function() {
+        return [f(a), []];
+      });
+    });
+  };
+  Writer.prototype.tell = function(y) {
+    var self = this;
+    return new Writer(function() {
+      return [null, self.run()[1].concat(y)];
     });
   };
 
@@ -209,28 +246,18 @@
   }
 
   function step(tree) {
-    var p = randomPos(tree),
-        r = new Route([0, 0]);
-    return new Pointer(new QuadTree(tree, r), new Pos(r, 0))
-      .extend(rules(p))
-      .tree
-      .board;
-  }
-
-  setup = new IO(function() {
-    element.width = size * scale;
-    element.height = size * scale;
-    canvas.scale(scale, scale);
-  });
-
-  function flattenTree(tree) {
-    var r = [], x, y;
-    for(x = 0; x < tree.length; x++) {
-      for(y = 0; y < tree[x].length; y++) {
-        r = r.concat(tree[x][y]); 
-      }
-    }
-    return r;
+    return tree.map(function(a) {
+      return randomPos(a);
+    }).chain(function(p) {
+      return tree.map(function(a) {
+        var r = new Route([0, 0]),
+            point = new Pointer(new QuadTree(a, r), new Pos(r, 0))
+              .extend(rules(p))
+              .tree
+              .board;
+        return point;
+      });
+    });
   }
 
   function generateTree() {
@@ -246,31 +273,45 @@
           }
         }
       }
-      return tree;
+      return Writer.of(tree);
     });
   }
 
   function drawTree(tree) {
     return new IO(function() {
-      var i, x, y;
-      for(i = 0; i < tree.length; i++) {
-        var x = i % size,
-            y = Math.floor(i / size);
-        if(tree[i]) {
-          canvas.fillStyle = "#eeee00";
-          canvas.fillRect(x, y, 1, 1);
-        } else {
-          canvas.clearRect(x, y, 1, 1);
+      return tree.map(function(a) {
+        var d = size / 4, 
+            x, y, z, ox, oy;
+        for(x = 0; x < a.length; x++) {
+          for(y = 0; y < a[x].length; y++) {
+            for(z = 0; z < a[x][y].length; z++) {
+              ox = (x * d) + (z % d);
+              oy = (y * d) + Math.floor(z / d);
+              if(a[x][y][z]) {
+                canvas.fillStyle = "#eeee00";
+                canvas.fillRect(ox, oy, 1, 1);
+              } else {
+                canvas.clearRect(ox, oy, 1, 1);
+              }
+            }
+          }
         }
-      }
+        return a;
+      });
     });
   }
 
   function loop(tree) {
-    return drawTree(flattenTree(tree)).chain(function() {
-      return loop(step(tree)).fork();
+    return drawTree(tree).chain(function(x) {
+      return loop(step(Writer.of(x.run()[0]))).fork();
     });
   }
+
+  setup = new IO(function() {
+    element.width = size * scale;
+    element.height = size * scale;
+    canvas.scale(scale, scale);
+  });
 
   main = setup.chain(generateTree).chain(loop);
 
