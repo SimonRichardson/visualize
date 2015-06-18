@@ -5,6 +5,9 @@
       size = 64,
       scale = 5,
       shardSize = Math.floor((size * size) / (4 * 4)),
+      treeLens,
+      nodesLens,
+      heuristicsLens,
       setup,
       main;
 
@@ -22,7 +25,7 @@
   function compose(f) {
     return function(g) {
       return function(h) {
-        return g(f(h));
+        return f(g(h));
       };
     };
   }
@@ -120,7 +123,100 @@
     });
   };
 
+  // Store
+  function Store(set, get) {
+    this.set = set;
+    this.get = get;
+  }
+  Store.prototype.extract = function() {
+    return this.set(this.get());
+  };
+  Store.prototype.extend = function(f) {
+    var self = this;
+    return new Store(
+      function(k) {
+        return f(new Store(
+          self.set,
+          function() {
+            return k;
+          }
+        ));
+      },
+      self.get
+    );
+  };
+  Store.prototype.map = function(f) {
+    return this.extend(function(c) {
+      return f(c.extract());
+    });
+  };
+
+  // Lens
+  function Lens(run) {
+    this.run = run;
+  }
+  Lens.id = function() {
+    return new Lens(function(target) {
+      return new Store(
+        identity,
+        constant(target)
+      );
+    });
+  };
+  Lens.arrayLens = function(index) {
+    return new Lens(function(a) {
+      return new Store(
+        function(s) {
+          var r = a.slice();
+          r[index] = s;
+          return r;
+        },
+        function() {
+          return a[index];
+        }
+      );
+    });
+  };
+  Lens.objectLens = function(property) {
+    return new Lens(function(o) {
+      return new Store(
+        function(s) {
+          var r = {},
+              k;
+          for(k in o) {
+            r[k] = o[k];
+          }
+          r[property] = s;
+          return r;
+        },
+        function() {
+          return o[property];
+        }
+      );
+    });
+  };
+  Lens.prototype.compose = function(b) {
+    var a = this;
+    return new Lens(function(target) {
+      var c = b.run(target),
+          d = a.run(c.get());
+      return new Store(
+        compose(c.set)(d.set),
+        d.get
+      );
+    });
+  };
+  Lens.prototype.andThen = function(b) {
+    return b.compose(this);
+  };
+  
   // Logic
+  function Heuristics(tree, heuristics, route) {
+    this.tree = tree;
+    this.heuristics = heuristics;
+    this.route = route;
+  }
+
   function Route(x) {
     this.x = x;
   }
@@ -214,27 +310,16 @@
     return pos.route.equals(pointer.pos.route) && pos.offset == pointer.pos.offset;
   }
 
-  function numOfSelectedInQuadrants(tree) {
-    var res = [], x, y;
-    for(x = 0; x < tree.length; x++) {
-      res[x] = [];
-      for(y = 0; y < tree[x].length; y++) {
-        res[x][y] = filter(tree[x][y], compose(not)(not)).length;
-      }
-    }
-    return res;
-  }
-
   function rankQuadrants(selected) {
-    var res = [], x, y, z;
-    for(x = 0; x < selected.length; x++) {
-      for(y = 0; y < selected[x].length; y++) {
-        res.push([new Route([x, y]), selected[x][y]])
-      }
-    }
-    return map(res.sort(function(a, b) {
-      return a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
-    }), first);
+    var ordering = function(a, b) {
+          var x = a[0].probability,
+              y = b[0].probability;
+          return x < y ? 1 : x > y ? -1 : 0;
+        },
+        fst = zipWithIndex(selected).sort(ordering),
+        snd = zipWithIndex(selected[fst[0][1]].nodes).sort(ordering);
+
+    return [fst[0][1], snd[0][1]];
   }
 
   function rules(pos) {
@@ -244,30 +329,59 @@
     };
   }
 
-  function randomPos(tree) {
-    var ranking = rankQuadrants(numOfSelectedInQuadrants(tree)),
-        head = ranking[0],
-        offset = filter(zipWithIndex(tree[head.x[0]][head.x[1]]), compose(first)(not));
-    return new Pos(head, offset[Math.floor(Math.random() * offset.length)][1]);
+  function rank(data) {
+    var ranking = rankQuadrants(data.heuristics),
+        route = new Route(ranking),
+        offset = filter(zipWithIndex(data.tree[ranking[0]][ranking[1]]), compose(not)(first));
+    return new Pos(route, offset[Math.floor(Math.random() * offset.length)][1]);
   }
 
   function step(tree) {
     return tree.map(function(a) {
-      return randomPos(a);
+      return [a, rank(a)];
     }).chain(function(p) {
-      return tree
-            .tell('Random Position: ' + p.toString())
+      var heuristics = p[0],
+          rnd = p[1];
+
+      return Writer.of(null)
+            .tell('Selected: ' + rnd.toString())
             .chain(function() {
-              return tree.map(function(a) {
+              return Writer.of(heuristics.tree).map(function(a) {
                 var r = new Route([0, 0]),
                     point = new Pointer(new QuadTree(a, r), new Pos(r, 0))
-                      .extend(rules(p))
+                      .extend(rules(rnd))
                       .tree
                       .board;
-                return point;
+                return new Heuristics(point, heuristics.heuristics, rnd);
               });
             });
     });
+  }
+
+  function updateHeuristics(data) {
+    var pos = data.route,
+        route = pos.route.x,
+        fstLens = Lens.arrayLens(route[0]),
+        sndLens = Lens.arrayLens(route[1]),
+
+        modify = function(x, f) {
+          return x.set(f(x.get()));
+        },
+        store = modify(fstLens.run(data.heuristics), function(x) {
+          return {
+            available: x.available - 1,
+            probability: (x.available - 1) / (shardSize * 4),
+            nodes: x.nodes
+          };
+        }),
+        heuristics = modify(fstLens.andThen(nodesLens).andThen(sndLens).run(store), function(x) {
+          return {
+            available: x.available - 1,
+            probability: (x.available / shardSize)
+          };
+        });
+
+    return heuristicsLens.run(data).set(heuristics);
   }
 
   function generateTree() {
@@ -287,17 +401,42 @@
     });
   }
 
+  function generateHeuristics(tree) {
+    return new IO(function() {
+      return tree.map(function(a) {
+        var pos = new Pos(new Route([0, 0]), 0),
+            heuristics = [],
+            x, y;
+        for(x = 0; x < a.length; x++) {
+          heuristics[x] = {
+            available: a[x][0].length * a[x].length,
+            probability: 1,
+            nodes: []
+          };
+          for(y = 0; y < a[x].length; y++) {
+            heuristics[x].nodes[y] = {
+              available: a[x][0].length,
+              probability: 1
+            };
+          }
+        }
+        return new Heuristics(a, heuristics, pos);
+      });
+    });
+  }
+
   function drawTree(tree) {
     return new IO(function() {
       return tree.map(function(a) {
-        var d = size / 4, 
+        var tree = a.tree,
+            d = size / 4, 
             x, y, z, ox, oy;
-        for(x = 0; x < a.length; x++) {
-          for(y = 0; y < a[x].length; y++) {
-            for(z = 0; z < a[x][y].length; z++) {
+        for(x = 0; x < tree.length; x++) {
+          for(y = 0; y < tree[x].length; y++) {
+            for(z = 0; z < tree[x][y].length; z++) {
               ox = (x * d) + (z % d);
               oy = (y * d) + Math.floor(z / d);
-              if(a[x][y][z]) {
+              if(tree[x][y][z]) {
                 canvas.fillStyle = "#eeee00";
                 canvas.fillRect(ox, oy, 1, 1);
               } else {
@@ -313,10 +452,15 @@
 
   function loop(tree) {
     return drawTree(tree).chain(function(x) {
-      var result = x.run();
-      return loop(step(Writer.of(result[0]))).fork();
+      var result = x.run(),
+          heuristics = updateHeuristics(result[0]);
+      return loop(step(Writer.of(heuristics))).fork();
     });
   }
+
+  treeLens = Lens.objectLens('tree');
+  nodesLens = Lens.objectLens('nodes');
+  heuristicsLens = Lens.objectLens('heuristics');
 
   setup = new IO(function() {
     element.width = size * scale;
@@ -324,7 +468,10 @@
     canvas.scale(scale, scale);
   });
 
-  main = setup.chain(generateTree).chain(loop);
+  main = setup
+        .chain(generateTree)
+        .chain(generateHeuristics)
+        .chain(loop);
 
   // Perform effects!
   main.unsafePerformIO();
