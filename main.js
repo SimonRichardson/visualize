@@ -427,6 +427,8 @@
 
   function drawTree(tree) {
     return new IO(function() {
+      stats.end();
+      stats.begin();
       return tree.map(function(a) {
         var tree = a.tree,
             d = size / 4, 
@@ -466,6 +468,7 @@
     element.width = size * scale;
     element.height = size * scale;
     canvas.scale(scale, scale);
+    stats.begin();
   });
 
   main = setup

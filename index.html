@@ -15,6 +15,12 @@
   </head>
   <body>
     <canvas id="board"></canvas>
-    <script src="main.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stats.js/r11/Stats.js"></script>
+    <script type="text/javascript">
+      var stats = new Stats();
+      stats.setMode(0);
+      document.body.appendChild( stats.domElement );
+    </script>
+    <script src="main.js"></script>    
   </body>
 </html>
