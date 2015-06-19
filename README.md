@@ -13,6 +13,7 @@ It also shows the following:
 
 ## Improvements:
 
+ * Use workers to run in parallel
  * Looking into generational spaces. Consider GC algorithms for available nodes.
 
 ## Contributions:
